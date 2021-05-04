@@ -1,0 +1,525 @@
+#!/bin/bash
+
+
+
+# Takes in a single parameter passed in from the command line.
+# Then checks if the file exists and if it does then check if it is readable.
+# If the file exists and is readble return 0, otherwise return 1 - these values
+# dictate either running the function or exiting with error message
+check_file_existence(){
+	# "If the file given in command line exists..."
+	if [ -f "$1" ]
+	# file exists
+	then
+		# if the file is readable...
+		if [ -r "$1" ]
+		then
+			# file is readable return 0
+			return 0
+		else
+			# file is not readable return 1
+			return 1
+		fi
+	# file does not exist
+	else
+		return 1
+	fi	
+}
+
+
+
+# Takes in a single matrix parameter, counts the rows and columns, then echos
+# them and returns 0. Echo can either print the values to the screen, or be returned
+# into variables to be used in other functions
+dims(){
+	# row and column variables
+	cols=0
+	rows=0
+	
+	first_line=$(head -n 1 $1)
+	# at this point the matrix is valid, therefore the first row holds the number of columns
+	for i in $first_line
+	do
+		# increment columns per value in the first line
+		cols=`expr $cols + '1'`
+	done
+
+
+	# read by line through the matrix
+	while read matrixline
+	do
+		# increment rows every line read
+		rows=`expr $rows + '1'`
+	done <$1
+
+	# echo rows and columns
+	printf "$rows $cols\n"
+
+	# no errors, return 0
+	return 0
+}
+
+
+
+# Takes in a single parameter. Switches the dimensions of the matrix from MxN to NxM with
+# values carried over as well. Cats the file holding the transposed matrix and returns 0.
+transpose(){
+	# temporary files for holding forms of the matrix
+	temp_file="tempfile$$"
+	col_file="colfile$$"
+	result_file="resultfile$$"
+
+	# iterate as many times as the first line has values
+	first_line=$(head -n 1 $1)
+	count=1
+
+	for i in $first_line
+	do
+		# cut a column from the matrix and put it into col file
+		cut -f $count $1 > $col_file
+
+		# cat the col file into a temp file changing newlines for tabs
+		cat $col_file | tr '\n' '\t' >> $temp_file
+
+		# echo a newline into the file to allow for dimensions
+		echo "" >> $temp_file 
+		count=`expr $count + '1'`
+	done
+
+	# cat the file holding the transposed matrix
+
+	matrix_r=0
+	matrix_c=0
+
+	read matrix_r matrix_c < <(dims $temp_file)
+
+	count=1
+	while read matrixline
+	do
+		for i in $matrixline
+		do
+			printf '%s' "$((i))" >> $result_file
+			if [ $count = $matrix_c ]
+			then
+				printf "\n" >> $result_file
+				count=1
+			else
+				printf "\t" >> $result_file
+				count=$((count+1))
+			fi
+		done
+	done < $temp_file
+
+	# show the results of the transpose
+	cat $result_file
+
+	# get rid of temporary files
+	rm -f $temp_file
+	rm -f $col_file
+	rm -f $result_file
+
+	# return no errors
+	return 0
+}
+
+
+
+# Takes in a single matrix parameter. The mean of each column is calculated and stored into a temporary file. The file is then
+# cat'ed to the screen and the function returns 0.
+mean(){
+
+	# matrix dimension variables
+	matrix_r=0
+	matrix_c=0
+
+	# runs dims function and reads values into dimension variables
+	read matrix_r matrix_c < <(dims $1)
+	
+	# temporary files for holding forms of the matrix
+	col_file="colfile$$"
+	row_file="rowfile$$"
+	means_file="meansfile$$"
+
+	# iterate as many times as there are values in the first rpow
+	first_line=$(head -n 1 $1)
+	count=1
+
+	# this for loop transposes the file to change columns to lines so they can 
+	# be added and divided easier
+	for i in $first_line
+	do
+		cut -f $count $1 > $col_file
+		cat $col_file | tr '\n' '\t' >> $row_file
+		echo "" >> $row_file
+		count=`expr $count + '1'`
+	done
+
+	# goes through each line of the now transposed matrix, each line in this 
+	# case is a column which will be added up and divided by the number of values
+	# to find mean
+
+	track=1
+
+	while read matrix_line
+	do
+		# sum and col count variable for later calculation
+		sum=0
+		col_count=0
+		for i in $matrix_line
+		do
+			# add i to the sum variable
+			sum=`expr $sum + $i`	
+			col_count=`expr $col_count + '1'`
+		done
+
+		# mean equation where sum is the sum of the numbers and col count
+		# is the count of the numbers
+		mean=$((($sum + ($col_count/2)*( ($sum>0)*2-1 )) / $col_count))
+		
+		printf '%s' "$(($mean))" >> $means_file
+		
+		# if the track variable equals the number of columns then print a 
+		# new line to the file, otherwise print a tab
+		# this allows for the mean file to be in proper matrix format
+		if [ $track = $matrix_c ]
+		then
+			printf "\n" >> $means_file
+		else
+			printf "\t" >> $means_file
+		fi
+		track=`expr $track + '1'`
+
+	done < $row_file
+
+	# print the file containing means
+	cat $means_file
+
+	# get rid of temporary files
+	rm -f $means_file
+	rm -f $col_file
+	rm -f $row_file
+	
+	# return with no errors
+	return 0
+}
+
+
+
+# Takes in two matrices and adds them up. First the matrices are checked to see if they have matching dimensions.
+# If the dimensions are valid the function proceeds, otherwise return 1 . The data is stored in a temporary file 
+# and then the temporary file is cat'ed to the screen. The function then returns 0.
+add(){
+
+	# variables for holding dimensions of matrices
+	matrix1_r=0
+	matrix1_c=0
+	matrix2_r=0
+	matrix2_c=0
+
+	# runs dims function and reads values into dimension variables
+	read matrix1_r matrix1_c < <(dims $1)
+	read matrix2_r matrix2_c < <(dims $2)
+
+
+	# checks for unmatching dimensions
+	if [ $matrix1_r != $matrix2_r ] || [ $matrix1_c != $matrix2_c ]
+	then
+		echo "Matrices are unable to be added due to dimension difference" > /dev/stderr
+		exit 1
+	fi
+
+	# matrices are clear for addition
+	m1_file="m1_file$$"
+	m2_file="m2_file$$"
+	paste_file="pastefile$$"
+	add_file="addfile$$"
+
+	# transform the files from matrices to single column files
+	tr "\t" "\n" < $1 > $m1_file
+	tr "\t" "\n" < $2 > $m2_file
+	
+	# paste the files side by side in a paste file
+	paste -d "\t" $m1_file $m2_file >> $paste_file
+
+	# count variable to keep track of dimensions
+	count=1
+	while read addline
+	do
+		# add up the now side by side corresponding numbers for addition
+		sum=0
+		for i in $addline
+		do
+			sum=`expr $sum + $i`
+		done
+
+		# append sum to file
+		printf '%s' "$((sum))" >> $add_file
+
+		# decide to either put a tab after the sum or a new line to keep the 
+		# dimensions of the matrix
+		if [ $count = $matrix1_c ] 
+		then
+			echo "" >> $add_file
+			count=1
+		else
+			printf "\t" >> $add_file
+			count=`expr $count + '1'`
+		fi
+	done < $paste_file
+
+	# print the file with sums of matrices
+	cat $add_file
+
+	# remove temporary files
+	rm -f $add_file
+	rm -f $paste_file
+	rm -f $m1_file
+	rm -f $m2_file
+
+	# return with no errors	
+	return 0
+}
+
+
+
+# Takes in two matrix parameters. First the matrices are check to see if they are capable
+# of being multiplied (matrix 1 rows == matrix 2 cols). If they are unable to be multiplied the
+# function echos to stderr and returns 1, otherwise the operations are done and the data
+# is stored in a temporary file. The temp file is cat'ed out and the function returns 0.
+multiply(){
+	#variables for holding dimensions of matrices
+	matrix1_r=0
+	matrix1_c=0
+	matrix2_r=0
+	matrix2_c=0
+
+	# runs dims function and reads values into dimension variables
+	read matrix1_r matrix1_c < <(dims $1)
+	read matrix2_r matrix2_c < <(dims $2)
+
+	
+	# checks for unmatching dimensions
+	if [ $matrix1_c != $matrix2_r ]
+	then
+		echo "Matrices are unable to be added due to dimensions" > /dev/stderr
+		exit 1
+	fi
+
+
+	# temporary files for holding forms of the matrices and results
+	temp_file="tempfile"
+	r_matrix="rmatrix"
+	col_file="colfile"
+	result_file="resultfile"
+	
+	# hold the first line of the second matrix
+	first_line=$(head -n 1 $2)
+	count=1
+
+	# transpose the second matrix, this is because matrix multiplication multiplies the
+	# first matrix's rows with the seconds' columns, this way we can multiply rows with
+	# rows instead
+	for i in $first_line
+	do
+		cut -f $count $2 > $col_file
+		cat $col_file | tr '\n' '\t' >> $temp_file
+		echo "" >> $temp_file 
+		count=`expr $count + '1'`
+	done
+
+	# first while loop that reads through matrix 1
+	while read matrix1line
+	do
+		# temporary files for pasting and containing the current matrix 1 line
+		paste_file="pastefile"
+		m1_line="m1line"
+		
+		# transforms the current matrix 1 line to row format for later pasting
+		for i in $matrix1line
+		do
+			printf '%s\n' "$((i))" >> $m1_line
+		done
+		
+		# track variable for dimensions
+		track=1 
+
+		# second while loop that reads through the second matrix file
+		while read matrix2line
+		do
+
+			# temporary file for current matrix 2 line
+			m2_line="m2line"
+
+			# transform the current matrix 2 line to row format
+			for i in $matrix2line		
+			do
+				printf '%s\n' "$((i))" >> $m2_line
+			done
+
+			# pastes matrix 1 and 2 lines for multiplication
+			paste -d "\t" $m1_line $m2_line > $paste_file
+
+
+			# sum variable for all products
+			sum=0
+
+			# reads through the pasted file
+			while read multiplyline
+			do
+
+				# operands for multiplication
+				n1=0
+				n2=0
+
+				# assigns the two variables to n1 and n2 based on count variable
+				count=0
+				for i in $multiplyline
+				do
+					if [ $count = 0 ]
+					then
+						n1=$i
+						count=1
+					elif [ $count = 1 ]
+					then
+						n2=$i
+					fi
+				done
+				
+				# multiply n1 and n2
+				n1=$(($n1*$n2))
+
+				# add product to sum variable 
+				sum=`expr $sum + $n1`
+		
+			done < $paste_file
+
+			# print the sum of the multiplications to result file
+			printf '%s' "$((sum))" >> $result_file
+			
+			# adds either a tab or newline char after the number based on track varibale
+			if [ $track = $matrix2_c ]
+			then
+				printf "\n" >> $result_file
+				track=1
+			else
+				printf "\t" >> $result_file
+				track=$((track + 1))
+			fi
+
+			# clear the m2 line file
+			rm -f "m2line"
+		done < $temp_file
+
+		# remove temporary files
+		rm -f "m1line"
+		rm -f "pastefile"
+
+	done < $1
+	
+	# show the results file
+	cat $result_file
+
+	# remove temporary files
+	rm -f "resultfile"
+	rm -f "tempfile"
+	rm -f "rmatrix"
+	rm -f "colfile"
+
+	# return with no errors
+	return 0
+}
+
+
+
+# ---------------------- "main" -----------------------#
+
+
+
+# variable that holds the data for std in
+datafilepath="datafile$$"
+
+# check if the command for operation is valid
+if [ $1 != "dims" ] && [ $1 != "transpose" ] && [ $1 != "add" ] && [ $1 != "multiply" ] && [ $1 != "mean" ]
+then
+	# if not echo to stderr and exit 1
+	echo "Invalid matrix operation" > /dev/stderr
+	exit 1
+fi
+
+
+#stdin detected
+if [ "$#" = "1" ]
+then
+	# if the operation does not match these then echo to stderr and exit 1
+	if [ $1 != "mean" ] && [ $1 != "dims" ] && [ $1 != "transpose" ]
+	then
+		echo "Invalid command format" > /dev/stderr
+		exit 1
+	fi
+
+	# cat the std in to the data file variable
+	cat > "$datafilepath"
+
+	$1 $datafilepath
+	rm -f $datafilepath
+	exit 0
+
+#file(s) detected for transpose, mean, or dims
+elif [ "$#" = "2" ]
+then
+	# if the operation does not match these then echo to stderr and exit 1
+	if [ $1 != "dims" ] && [ $1 != "mean" ] && [ $1 != "transpose" ]
+	then
+		echo "Invalid command format" > /dev/stderr
+		exit 1
+	fi
+
+	# check to see if the file exists and is readable
+	check_file_existence $2
+	if test $? -eq 1
+	then
+		# if the file does not exist or is unreadable echo to stderr and exit 1
+		echo "file cannot be accessed" > /dev/stderr
+		exit 1
+	else
+		# assign the file to the datafile variable
+		datafilepath=$2
+
+		$1 $datafilepath
+		rm -f "datafilepath$$"
+		exit 0	
+	fi
+
+# if the number of parameters is 3 - this is for multiply and add
+elif [ "$#" = "3" ]
+then
+	if [ $1 != "add" ] && [ $1 != "multiply" ]
+	then
+		echo "Invalid command format" > /dev/stderr
+		exit 1
+	fi	
+	# check to see if the files exist and are readable
+	check_file_existence $2
+	check1=$?
+	check_file_existence $3
+	check2=$?
+
+	# if either check is 1 then do not run the operation
+	if [ $check1 = 0 ] && [ $check2 = 0 ]
+	then
+		# run operation with matrices
+		$1 ${@:2}	
+		exit 0
+	else
+		# echo to stderr and exit 1
+		echo "Invalid file(s)" > /dev/stderr
+		exit 1
+		
+	fi
+
+# too many parameters	
+else
+	# echo to stderr and exit 1
+	echo "Invalid command" > /dev/stderr
+	exit 1
+fi
